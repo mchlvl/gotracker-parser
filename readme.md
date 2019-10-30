@@ -6,7 +6,6 @@ Parses logs created with [gotracker](https://github.com/mchlvl/gotracker).
 
 ### Build
 
-Executable has slower runtime, thus examples made from python files.
 
 ```
 set PYTHONOPTIMIZE=1 && pyinstaller --onedir cli.spec
