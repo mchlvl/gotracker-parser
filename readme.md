@@ -1,7 +1,3 @@
-# TODO
-
-- clock running from 0:00:00 to 23:59:59 is limited. potentially will switch to 2:00:00 to 25:59:59 schedule to offset activity around midnight
-
 # Docs
 
 Parses logs created with [gotracker](https://github.com/mchlvl/gotracker).
