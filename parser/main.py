@@ -77,14 +77,24 @@ def fraction(x: pd.Series) -> float:
     return 100 * x / float(x.sum())
 
 
-def delta_to_string(delta: pd.Series):
-    delta = pd.to_timedelta(delta, unit="second")
-    return (
-        delta.astype(str)
-        .str[:-10]
-        .str.replace(" days ", "d ")
-        .str.replace("0d ", "")
+def to_string(delta: pd.Series) -> pd.Series:
+    hours = delta.dt.days * 24
+    hours += delta.dt.seconds // 3600
+    minutes = delta.dt.seconds % 3600 // 60
+    seconds = delta.dt.seconds % 3600 % 60
+    delta = (
+        hours.astype(str).apply(lambda x: x.zfill(2))
+        + ":"
+        + minutes.astype(str).apply(lambda x: x.zfill(2))
+        + ":"
+        + seconds.astype(str).apply(lambda x: x.zfill(2))
     )
+    return delta
+
+
+def delta_to_string(delta: pd.Series) -> pd.Series:
+    delta = pd.to_timedelta(delta, unit="second")
+    return to_string(delta)
 
 
 def filter_data(
@@ -167,14 +177,27 @@ def by_agg(
     misc_columns: List[str],
 ) -> pd.DataFrame:
     groupby_columns_ext = groupby_columns + misc_columns
+    groupby_columns_ext_detailed = groupby_columns_ext + ["Date"]
     data["End"] = pd.to_timedelta(data["Start"]) + pd.to_timedelta(
         data.DurationSeconds, unit="second"
     )
-    onoff = data.groupby(groupby_columns_ext).Start.agg(["min"])
-    onoff["max"] = data.groupby(groupby_columns_ext).End.agg(["max"])
+
+    onoff = data.groupby(groupby_columns_ext_detailed).Start.agg(["min"])
+    onoff["max"] = data.groupby(groupby_columns_ext_detailed).End.agg(["max"])
     onoff["PotentialDuration"] = pd.to_timedelta(
         onoff["max"]
     ) - pd.to_timedelta(onoff["min"])
+    onoffmin = onoff.reset_index().groupby(groupby_columns_ext)[["min"]].min()
+    onoffmax = onoff.reset_index().groupby(groupby_columns_ext)[["min"]].max()
+
+    onoffdur = (
+        onoff.reset_index()
+        .groupby(groupby_columns_ext)[["PotentialDuration"]]
+        .sum()
+    )
+    onoff = onoffmin
+    onoff["max"] = onoffmax
+    onoff["PotentialDuration"] = onoffdur
 
     onoff["RecordedDuration"] = pd.to_timedelta(
         data.groupby(groupby_columns_ext).DurationSeconds.agg(["sum"])["sum"],
@@ -190,13 +213,10 @@ def by_agg(
     ix = ix.groupby(groupby_columns).RecordedDuration.nlargest(nlargest)
     onoff = onoff.iloc[ix.index.get_level_values(-1)]
 
-    onoff["RecordedDuration"] = (
-        onoff["RecordedDuration"].astype(str).str[-18:-10]
-    )
-    onoff["PotentialDuration"] = (
-        onoff["PotentialDuration"].astype(str).str[-18:-10]
-    )
-    onoff["max"] = onoff["max"].astype(str).str[-18:-10]
+    onoff["RecordedDuration"] = to_string(onoff["RecordedDuration"])
+    onoff["PotentialDuration"] = to_string(onoff["PotentialDuration"])
+    if "max" in onoff.columns:
+        onoff["max"] = onoff["max"].astype(str)
     onoff = onoff.round(2)
     onoff = onoff.sort_values(
         groupby_columns + ["RecordedDuration"], ascending=False
@@ -235,8 +255,8 @@ def method_pointer(
         groupby_columns = ["Year"]
 
     print(
-            f"INFO: Level: '{level}', reports up to '{nlargest}' records (totals) of duration >= '{minduration}s', per '{per}'\n"
-        )
+        f"INFO: Level: '{level}', reports up to '{nlargest}' records (totals) of duration >= '{minduration}s', per '{per}'\n"
+    )
 
     # agg time
     if level == 0:
@@ -310,7 +330,7 @@ def method_pointer(
         agg = fitler_nlargets(
             agg, level, nlargest, groupby_columns, misc_columns
         )
-    
+
     if level > 1:
         agg["Duration"] = delta_to_string(agg["Duration"])
 
