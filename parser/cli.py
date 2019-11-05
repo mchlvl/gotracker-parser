@@ -61,12 +61,7 @@ parser.add_argument(
     help="Whether the full index is to be displayed. Recommended for further cmd filtering.",
 )
 parser.add_argument(
-    "-f",
-    "--find",
-    dest="find",
-    default="",
-    type=str.lower,
-    help="String to find",
+    "-f", "--find", dest="find", default="", type=str.lower, help="String to find"
 )
 
 args = parser.parse_args()
@@ -76,11 +71,5 @@ if args.detailed and level < 5:
 data = load_data(time_recency=args.nlogs)
 classify(data)
 method_pointer(
-    data,
-    level,
-    args.nlargest,
-    args.per,
-    args.minduration,
-    args.resetindex,
-    args.find,
+    data, level, args.nlargest, args.per, args.minduration, args.resetindex, args.find
 )

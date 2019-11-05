@@ -15,12 +15,7 @@ def load_data(time_recency: int = 1) -> pd.DataFrame:
     data = pd.DataFrame()
     for path in pathlist:
         data = data.append(pd.read_json(path, lines=True))
-    print(
-        "INFO: loaded",
-        len(pathlist),
-        "files resulting in data of size",
-        data.shape,
-    )
+    print("INFO: loaded", len(pathlist), "files resulting in data of size", data.shape)
 
     date = data["Date"].apply(pd.to_datetime)
     data["Year"] = date.dt.year
@@ -41,21 +36,16 @@ def filter_pathlist(pathlist: List[str], time_recency: str) -> List[str]:
 
 
 def classify(data: pd.DataFrame) -> None:
-    data[["Details", "Project", "ExecutableName"]] = data["Window"].str.rsplit(
-        " - ", n=2, expand=True
+    data[["Details", "Project", "Name"]] = (
+        data["Window"].str.split(r" \| | - ", expand=True).iloc[:, :3]
     )
-    # replace with regex
-    data.loc[
-        data["Project"].isnull(), ["Details", "Project", "ExecutableName"]
-    ] = data.loc[data["Project"].isnull(), "Window"].str.rsplit(
-        " | ", n=2, expand=True
-    )
+
     ix = data.Project.isnull()
     data.loc[ix, "Project"] = data.loc[ix, "Details"]
     data.loc[ix, "Details"] = None
 
-    ix = data.ExecutableName.isnull()
-    data.loc[ix, "ExecutableName"] = data.loc[ix, "Project"]
+    ix = data.Name.isnull()
+    data.loc[ix, "Name"] = data.loc[ix, "Project"]
     data.loc[ix, "Project"] = None
 
     ix = data.Project.isnull()
@@ -108,25 +98,27 @@ def filter_data(
     agg = data.groupby(groupby_columns + misc_columns).DurationSeconds.agg(
         Duration="sum", Count="count"
     )
-
     agg["DurationExe"] = agg.groupby(groupby_columns + misc_columns[:1])[
         "Duration"
     ].sum()
-    agg["%OfExe"] = agg.groupby(groupby_columns + misc_columns[:1])[
-        "Duration"
-    ].apply(lambda x: fraction(x))
+    agg["%OfExe"] = agg.groupby(groupby_columns + misc_columns[:1])["Duration"].apply(
+        lambda x: fraction(x)
+    )
     if level >= 6:
-        agg["DurationProject"] = agg.groupby(
-            groupby_columns + misc_columns[:3]
-        )["Duration"].sum()
+        agg["DurationProject"] = agg.groupby(groupby_columns + misc_columns[:3])[
+            "Duration"
+        ].sum()
         agg["%OfProject"] = agg.groupby(groupby_columns + misc_columns[:3])[
             "Duration"
         ].apply(lambda x: fraction(x))
 
         agg["DurationProject"] = delta_to_string(agg["DurationProject"])
 
-    agg["DurationTotal"] = agg.groupby(groupby_columns)["Duration"].sum()
+    duration_total = agg.groupby(groupby_columns)[["Duration"]].sum()
+    duration_total.rename(columns={"Duration": "DurationTotal"}, inplace=True)
+    agg = agg.merge(duration_total, left_index=True, right_index=True)
     agg["%OfTotal"] = agg["Duration"] / agg["DurationTotal"] * 100
+
     agg = agg.round(2)
     agg = agg.loc[agg["Duration"] >= minduration, :]
 
@@ -150,9 +142,9 @@ def fitler_nlargets(
             agg = agg.iloc[ix.index.get_level_values(-1)]
         else:
             ix = agg.reset_index()
-            ix = ix.groupby(
-                groupby_columns + misc_columns[:-1]
-            ).Duration.nlargest(nlargest)
+            ix = ix.groupby(groupby_columns + misc_columns[:-1]).Duration.nlargest(
+                nlargest
+            )
             agg = agg.iloc[ix.index.get_level_values(-1)]
         agg = agg.sort_values(
             groupby_columns + ["DurationExe", "Duration"], ascending=False
@@ -184,16 +176,14 @@ def by_agg(
 
     onoff = data.groupby(groupby_columns_ext_detailed).Start.agg(["min"])
     onoff["max"] = data.groupby(groupby_columns_ext_detailed).End.agg(["max"])
-    onoff["PotentialDuration"] = pd.to_timedelta(
-        onoff["max"]
-    ) - pd.to_timedelta(onoff["min"])
+    onoff["PotentialDuration"] = pd.to_timedelta(onoff["max"]) - pd.to_timedelta(
+        onoff["min"]
+    )
     onoffmin = onoff.reset_index().groupby(groupby_columns_ext)[["min"]].min()
-    onoffmax = onoff.reset_index().groupby(groupby_columns_ext)[["min"]].max()
+    onoffmax = onoff.reset_index().groupby(groupby_columns_ext)[["max"]].max()
 
     onoffdur = (
-        onoff.reset_index()
-        .groupby(groupby_columns_ext)[["PotentialDuration"]]
-        .sum()
+        onoff.reset_index().groupby(groupby_columns_ext)[["PotentialDuration"]].sum()
     )
     onoff = onoffmin
     onoff["max"] = onoffmax
@@ -203,9 +193,7 @@ def by_agg(
         data.groupby(groupby_columns_ext).DurationSeconds.agg(["sum"])["sum"],
         unit="second",
     )
-    onoff["%ofPotential"] = (
-        onoff["RecordedDuration"] / onoff["PotentialDuration"] * 100
-    )
+    onoff["%ofPotential"] = onoff["RecordedDuration"] / onoff["PotentialDuration"] * 100
     minduration = pd.to_timedelta(minduration, unit="seconds")
     onoff = onoff.loc[onoff["RecordedDuration"] >= minduration, :]
 
@@ -216,11 +204,10 @@ def by_agg(
     onoff["RecordedDuration"] = to_string(onoff["RecordedDuration"])
     onoff["PotentialDuration"] = to_string(onoff["PotentialDuration"])
     if "max" in onoff.columns:
-        onoff["max"] = onoff["max"].astype(str)
+        # onoff["max"] = onoff["max"].astype(str)
+        onoff["max"] = delta_to_string(onoff["max"])
     onoff = onoff.round(2)
-    onoff = onoff.sort_values(
-        groupby_columns + ["RecordedDuration"], ascending=False
-    )
+    onoff = onoff.sort_values(groupby_columns + ["RecordedDuration"], ascending=False)
     return onoff
 
 
@@ -261,15 +248,11 @@ def method_pointer(
     # agg time
     if level == 0:
         misc_columns = []
-        agg = by_agg(
-            data, groupby_columns, nlargest, minduration, misc_columns
-        )
+        agg = by_agg(data, groupby_columns, nlargest, minduration, misc_columns)
     # agg time + exec
     elif level == 1:
         misc_columns = ["Executable"]
-        agg = by_agg(
-            data, groupby_columns, nlargest, minduration, misc_columns
-        )
+        agg = by_agg(data, groupby_columns, nlargest, minduration, misc_columns)
     # agg time + exec
     elif level == 2:
         misc_columns = ["Executable"]
@@ -277,59 +260,47 @@ def method_pointer(
             data, level, groupby_columns, nlargest, misc_columns, minduration
         )
         agg = filter_find(agg, find)
-        agg = fitler_nlargets(
-            agg, level, nlargest, groupby_columns, misc_columns
-        )
+        agg = fitler_nlargets(agg, level, nlargest, groupby_columns, misc_columns)
     # agg time + exec + exec name
     elif level == 3:
-        misc_columns = ["Executable", "ExecutableName"]
+        misc_columns = ["Executable", "Name"]
         agg = filter_data(
             data, level, groupby_columns, nlargest, misc_columns, minduration
         )
         agg = filter_find(agg, find)
-        agg = fitler_nlargets(
-            agg, level, nlargest, groupby_columns, misc_columns
-        )
+        agg = fitler_nlargets(agg, level, nlargest, groupby_columns, misc_columns)
     # agg time + exec + exec name + Project BY DUR
     elif level == 4:
-        misc_columns = ["Executable", "ExecutableName", "Project"]
+        misc_columns = ["Executable", "Name", "Project"]
         agg = filter_data(
             data, level, groupby_columns, nlargest, misc_columns, minduration
         )
         agg = filter_find(agg, find)
-        agg = fitler_nlargets(
-            agg, level, nlargest, groupby_columns, misc_columns
-        )
+        agg = fitler_nlargets(agg, level, nlargest, groupby_columns, misc_columns)
     # agg time + exec + exec name + Project BY EXE
     elif level == 5:
-        misc_columns = ["Executable", "ExecutableName", "Project"]
+        misc_columns = ["Executable", "Name", "Project"]
         agg = filter_data(
             data, level, groupby_columns, nlargest, misc_columns, minduration
         )
         agg = filter_find(agg, find)
-        agg = fitler_nlargets(
-            agg, level, nlargest, groupby_columns, misc_columns
-        )
+        agg = fitler_nlargets(agg, level, nlargest, groupby_columns, misc_columns)
     # agg time + exec + exec name + Project BY DUR
     elif level == 6:
-        misc_columns = ["Executable", "ExecutableName", "Project", "Details"]
+        misc_columns = ["Executable", "Name", "Project", "Details"]
         agg = filter_data(
             data, level, groupby_columns, nlargest, misc_columns, minduration
         )
         agg = filter_find(agg, find)
-        agg = fitler_nlargets(
-            agg, level, nlargest, groupby_columns, misc_columns
-        )
+        agg = fitler_nlargets(agg, level, nlargest, groupby_columns, misc_columns)
     # agg time + exec + exec name + Project BY EXE
     elif level == 7:
-        misc_columns = ["Executable", "ExecutableName", "Project", "Details"]
+        misc_columns = ["Executable", "Name", "Project", "Details"]
         agg = filter_data(
             data, level, groupby_columns, nlargest, misc_columns, minduration
         )
         agg = filter_find(agg, find)
-        agg = fitler_nlargets(
-            agg, level, nlargest, groupby_columns, misc_columns
-        )
+        agg = fitler_nlargets(agg, level, nlargest, groupby_columns, misc_columns)
 
     if level > 1:
         agg["Duration"] = delta_to_string(agg["Duration"])

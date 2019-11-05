@@ -1,5 +1,7 @@
 #!/bin/bash
 
+cd ..
+
 export PIPENV_VENV_IN_PROJECT=1
 
 pip install pipenv --upgrade
